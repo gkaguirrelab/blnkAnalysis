@@ -13,20 +13,6 @@ sys.path.append(os.path.dirname(__file__))
 import extract_eye_features
 import video_io
 
-
-"""Use this command to copy data off of the linux laptop to the analysis machine"""
-"""
-while true; do
-  /opt/homebrew/bin/rsync -av --partial --append-verify --info=progress2 --timeout=60 --compress-level=1 \
-    --bwlimit=60000 \
-    -e 'ssh -p 22 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o TCPKeepAlive=yes -o IPQoS=throughput -o RekeyLimit=4G -o Compression=no' \
-    gka@10.30.8.122:/media/gka/EYEVIDEOS/lightLevel/HERO_gka/  ./HERO_gka/ && break
-  echo "Retrying in 10s…"; sleep 10
-done
-
-"""
-
-
 """Predict eye features (pupil and eyelid) for a given BLNK video"""
 def predict_eye_features(filepath: str,
                          output_folder_path: str, 
@@ -48,58 +34,71 @@ def predict_eye_features(filepath: str,
     # Videos are small, so we can load them entirely in from memory 
     video_as_arr: np.ndarray = video_io.destruct_video(filepath, is_grayscale=True)
 
-    # Crop out only the eye from the video
-    # and set the rest of the frame to black 
-    video_cropped: np.ndarray = video_as_arr[:, t:b, l:r].copy()
-    white_pixels: np.ndarray = np.mean(video_cropped, axis=(0,))  > threshold_value
-    video_cropped[:, white_pixels] = 0
+    # Note: A given BLNK video is composed of 2 independent 
+    # videos of L and R eyes joined at the middle. They are 
+    # the same size originally image wise, so first, we must split them 
+    width_midpoint: int = video_as_arr.shape[2] // 2
+    L_video: np.ndarary = video_as_arr[:, :, :width_midpoint]
+    R_video: np.ndarray = video_as_arr[:, :, width_midpoint:]
+    assert L_video.shape == R_video.shape, f"Shape of L video: {L_video.shape} not equal to R video: {R_video.shape}"
 
-    # Resize the video to not a small resolution 
-    y_offset = (target_size[0] - video_cropped.shape[1]) // 2
-    x_offset = (target_size[1] - video_cropped.shape[2]) // 2
+    for eye_label, eye_video in zip("LR", (L_video, R_video)):
+      # Define the eye video name (replacing dual with what eye this is)
+      assert "dual" in video_name, f"'dual' not in video name: {video_name}"
+      eye_video_name: str = video_name.replace("dual", eye_label)  
 
-    video_resized: np.ndarray = np.zeros((len(video_cropped), *target_size), dtype=np.uint8)
-    video_resized[:, y_offset:y_offset + video_cropped.shape[1], x_offset:x_offset + video_cropped.shape[2]] = video_cropped
+      # Crop out only the eye from the video
+      # and set the rest of the frame to black 
+      eye_video: np.ndarray = eye_video[:, t:b, l:r].copy()
+      white_pixels: np.ndarray = np.mean(eye_video, axis=(0,))  > threshold_value
+      eye_video[:, white_pixels] = 0
 
-    # Generate a temp video from this cropped video 
-    if(not os.path.exists(temp_dir_path)):
-        os.mkdir(temp_dir_path)
+      # Resize the video to not a small resolution 
+      y_offset = (target_size[0] - eye_video.shape[1]) // 2
+      x_offset = (target_size[1] - eye_video.shape[2]) // 2
 
-    temp_video_path: str = os.path.join(temp_dir_path, f"temp_{video_name}.avi")
-    video_io.frames_to_video(video_resized, temp_video_path, video_fps)
+      video_resized: np.ndarray = np.zeros((len(eye_video), *target_size), dtype=np.uint8)
+      video_resized[:, y_offset:y_offset + eye_video.shape[1], x_offset:x_offset + eye_video.shape[2]] = eye_video
 
-    # Extract the eye features for this video
-    eye_features: list[dict] = extract_eye_features.extract_eye_features(temp_video_path, 
-                                                                         is_grayscale=True, 
-                                                                         visualize_results=False, 
-                                                                         pupil_feature_method='pylids', 
-                                                                         safe_execution=True
-                                                                        )
+      # Generate a temp video from this cropped video 
+      if(not os.path.exists(temp_dir_path)):
+          os.mkdir(temp_dir_path)
 
-    # Repackage the features along with their metadata
-    eye_features_dict: dict = {}
-    eye_features_dict["eye_features"] = eye_features
-    eye_features_dict["metadata"] = {'threshold_value': {'v': threshold_value, 
-                                                    'desc': "binary mask constructed from avg cropped frame. Pixels above this value=0. Done to remove light around the eye"
-                                                      },
-                                     'crop_box': {'v': crop_box, 
-                                                'desc': "box cropped out from original video to isolate the eye (t, b, l, r)"
-                                                },
-                                     'target_size': {'v': target_size,
-                                                    'desc': "target size after crop + threshold. Eye video is centered via padding to reach this size"},
-                                     'model_names': {'v': ('pytorch-pupil-v1', 'pytorch-eyelid-v1'), 
-                                                    'desc': "models used for pupil/eyelid fitting"
-                                                  }
-                                   }
-    
-    
-    # Output the features
-    scipy.io.savemat(os.path.join(output_folder_path, f"{video_name}_eye_features.mat"), 
-                    {"eye_features": eye_features_dict}
-                    )
-    
-    # Remvove the temp avi video 
-    os.remove(temp_video_path)
+      temp_video_path: str = os.path.join(temp_dir_path, f"temp_{eye_video_name}.avi")
+      video_io.frames_to_video(video_resized, temp_video_path, video_fps)
+
+      # Extract the eye features for this video
+      eye_features: list[dict] = extract_eye_features.extract_eye_features(temp_video_path, 
+                                                                           is_grayscale=True, 
+                                                                           visualize_results=False, 
+                                                                           pupil_feature_method='pylids', 
+                                                                           safe_execution=True
+                                                                          )
+
+      # Repackage the features along with their metadata
+      eye_features_dict: dict = {}
+      eye_features_dict["eye_features"] = eye_features
+      eye_features_dict["metadata"] = {'threshold_value': {'v': threshold_value, 
+                                                      'desc': "binary mask constructed from avg cropped frame. Pixels above this value=0. Done to remove light around the eye"
+                                                        },
+                                      'crop_box': {'v': crop_box, 
+                                                  'desc': "box cropped out from original video to isolate the eye (t, b, l, r)"
+                                                  },
+                                      'target_size': {'v': target_size,
+                                                      'desc': "target size after crop + threshold. Eye video is centered via padding to reach this size"},
+                                      'model_names': {'v': ('pytorch-pupil-v1', 'pytorch-eyelid-v1'), 
+                                                      'desc': "models used for pupil/eyelid fitting"
+                                                    }
+                                    }
+      
+      
+      # Output the features
+      scipy.io.savemat(os.path.join(output_folder_path, f"{eye_video_name}_eye_features.mat"), 
+                       {"eye_features": eye_features_dict}
+                      )
+      
+      # Remvove the temp avi video 
+      os.remove(temp_video_path)
 
     return 
 
