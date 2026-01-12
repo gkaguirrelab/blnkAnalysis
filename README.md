@@ -16,4 +16,4 @@ Then, follow the setup instructions for pylids, located in the <pylids> director
 
 ## Usage 
 
-The entire pipeline can be interacted with via the JupyterNotebook located in </blnk_analysis_pipeline>. 
+The entire pipeline can be interacted with via the JupyterNotebook located in ```bash blnk_analysis_pipeline```. 
