@@ -7,6 +7,7 @@ import sys
 import subprocess
 import shlex
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 # Import custom libraries
 sys.path.append(os.path.dirname(__file__))
@@ -19,7 +20,9 @@ def predict_eye_features(filepath: str,
                          crop_box: tuple[int]=(140, 275, 190, 425), 
                          target_size: tuple[int]=(480, 640),   
                          temp_dir_path: str="./BLNK_temp", 
-                         threshold_value: int=225
+                         threshold_value: int=225,
+                         visualize_results: bool=False,
+                         overrwrite_existing: bool=False
                         ) -> None:
 
     # Define the portion of the video to crop out 
@@ -47,18 +50,44 @@ def predict_eye_features(filepath: str,
       assert "dual" in video_name, f"'dual' not in video name: {video_name}"
       eye_video_name: str = video_name.replace("dual", eye_label)  
 
+      visualization_output_path: str = os.path.join(output_folder_path, f"{eye_video_name}_eye_features_visualized.avi")
+      output_path: str = os.path.join(output_folder_path, f"{eye_video_name}_eyeFeatures.mat")
+      if(overrwrite_existing is False and os.path.exists(output_path)):
+          continue
+
       # Crop out only the eye from the video
       # and set the rest of the frame to black 
-      eye_video: np.ndarray = eye_video[:, t:b, l:r].copy()
-      white_pixels: np.ndarray = np.mean(eye_video, axis=(0,))  > threshold_value
-      eye_video[:, white_pixels] = 0
+      eye_video_pixel_modified: np.ndarray = eye_video[:, t:b, l:r].copy()
+      white_pixels: np.ndarray = np.mean(eye_video_pixel_modified, axis=(0,)) > threshold_value
+      eye_video_pixel_modified[:, white_pixels] = 0
 
       # Resize the video to not a small resolution 
-      y_offset = (target_size[0] - eye_video.shape[1]) // 2
-      x_offset = (target_size[1] - eye_video.shape[2]) // 2
+      y_offset = (target_size[0] - eye_video_pixel_modified.shape[1]) // 2
+      x_offset = (target_size[1] - eye_video_pixel_modified.shape[2]) // 2
 
       video_resized: np.ndarray = np.zeros((len(eye_video), *target_size), dtype=np.uint8)
-      video_resized[:, y_offset:y_offset + eye_video.shape[1], x_offset:x_offset + eye_video.shape[2]] = eye_video
+      video_resized[:, y_offset:y_offset + eye_video_pixel_modified.shape[1], x_offset:x_offset + eye_video_pixel_modified.shape[2]] = eye_video_pixel_modified
+
+      # Display the transfomred image if desired
+         # If we want to visualize, we will display what the thresholding and cropping looks like 
+      fig, axes = None, None
+      if(visualize_results is True):
+          fig, axes = plt.subplots(1, 3, figsize=(16, 14))
+          axes = axes.flatten()
+
+          axes[0].set_title(f"Original image")
+          axes[0].imshow(video_as_arr[0], cmap='gray')
+
+          axes[1].set_title(f"{eye_label} | Before Transformations")
+          axes[1].imshow(eye_video[0], cmap='gray')
+          crop_box_rect: patches.Rectangle = patches.Rectangle((l, t), r-l, b-t, linewidth=2, edgecolor='red', facecolor='none', fill=False)
+          axes[1].add_patch(crop_box_rect)
+
+          axes[2].set_title(f"{eye_label} | After Pixel Brightness + Spatial Transformation")
+          axes[2].imshow(video_resized[0], cmap='gray')
+
+          # Show the figure
+          plt.show()
 
       # Generate a temp video from this cropped video 
       if(not os.path.exists(temp_dir_path)):
@@ -68,16 +97,18 @@ def predict_eye_features(filepath: str,
       video_io.frames_to_video(video_resized, temp_video_path, video_fps)
 
       # Extract the eye features for this video
-      eye_features: list[dict] = extract_eye_features.extract_eye_features(temp_video_path, 
-                                                                           is_grayscale=True, 
-                                                                           visualize_results=False, 
-                                                                           pupil_feature_method='pylids', 
-                                                                           safe_execution=True
-                                                                          )
+      eye_features, perimeter_info_dict = extract_eye_features.extract_eye_features(temp_video_path, 
+                                                                                    is_grayscale=True, 
+                                                                                    visualize_results=visualize_results,
+                                                                                    visualization_output_filepath=visualization_output_path,
+                                                                                    pupil_feature_method='pylids', 
+                                                                                    safe_execution=True
+                                                                                   )
 
+                                                                                   
       # Repackage the features along with their metadata
       eye_features_dict: dict = {}
-      eye_features_dict["eye_features"] = eye_features
+      eye_features_dict["data"] = eye_features
       eye_features_dict["metadata"] = {'threshold_value': {'v': threshold_value, 
                                                       'desc': "binary mask constructed from avg cropped frame. Pixels above this value=0. Done to remove light around the eye"
                                                         },
@@ -91,10 +122,9 @@ def predict_eye_features(filepath: str,
                                                     }
                                     }
       
-      
       # Output the features
       scipy.io.savemat(os.path.join(output_folder_path, f"{eye_video_name}_eye_features.mat"), 
-                       {"eye_features": eye_features_dict}
+                       {"eyeFeatures": eye_features_dict}
                       )
       
       # Remvove the temp avi video 

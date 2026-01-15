@@ -483,7 +483,7 @@ def extract_eye_features(video: str | np.ndarray,
 			             safe_execution: bool=True, 
                          pupil_feature_method: Literal["pylids", "pupil-labs"] = "pylids",
                          keypoint_threshold: float=0.65
-                        ) -> list[dict]:
+                        ) -> tuple[dict, dict]:
     
     # Retrieve the framecount of the video. We will use this for safeguarding 
     # silent errors when running with safe execution

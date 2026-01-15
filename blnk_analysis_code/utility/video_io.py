@@ -12,6 +12,18 @@ import h5py
 import dill
 import pathlib
 import sys
+import queue
+import multiprocessing as mp
+
+"""Clear a mp.queue"""
+def clear_mp_queue(q: object) -> None:
+    while(not q.empty()):
+        try:
+            q.get(timeout=1)
+        except queue.Empty as e:
+            break 
+
+    return
 
 """Given a directory of frames, read them in and convert to video"""
 def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
