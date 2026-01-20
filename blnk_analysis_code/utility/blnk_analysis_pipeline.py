@@ -52,8 +52,8 @@ def predict_eye_features(filepath: str,
 
       visualization_output_path: str = os.path.join(output_folder_path, f"{eye_video_name}_eye_features_visualized.avi")
       output_path: str = os.path.join(output_folder_path, f"{eye_video_name}_eyeFeatures.mat")
-      if(overrwrite_existing is False and os.path.exists(output_path)):
-          continue
+      if(os.path.exists(output_path) and overrwrite_existing is False):
+          continue 
 
       # Crop out only the eye from the video
       # and set the rest of the frame to black 
@@ -123,7 +123,7 @@ def predict_eye_features(filepath: str,
                                     }
       
       # Output the features
-      scipy.io.savemat(os.path.join(output_folder_path, f"{eye_video_name}_eye_features.mat"), 
+      scipy.io.savemat(os.path.join(output_folder_path, output_path), 
                        {"eyeFeatures": eye_features_dict}
                       )
       
