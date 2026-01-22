@@ -109,7 +109,8 @@ def predict_eye_features(filepath: str,
           axes[1].add_patch(crop_box_rect)
 
           axes[2].set_title(f"{eye_label} | After Pixel + Spatial Transformations")
-          axes[2].imshow(video_io.extract_frames_from_video(temp_video_path, (0,), is_grayscale=True), cmap='gray')
+          sample_frame: np.ndarray = np.squeeze(video_io.extract_frames_from_video(temp_video_path, (0,), is_grayscale=True))
+          axes[2].imshow(sample_frame, cmap='gray')
 
           # Show the figure
           plt.show()
