@@ -8,6 +8,8 @@ import subprocess
 import shlex
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from typing import Literal
+import cv2
 
 # Import custom libraries
 sys.path.append(os.path.dirname(__file__))
@@ -22,7 +24,10 @@ def predict_eye_features(filepath: str,
                          temp_dir_path: str="./BLNK_temp", 
                          threshold_value: int=225,
                          visualize_results: bool=False,
-                         overrwrite_existing: bool=False
+                         overrwrite_existing: bool=False,
+                         contrast_alpha_beta: tuple[float] = (1, 0),
+                         gamma: float = 1,
+                         debug_mode: bool=False
                         ) -> None:
 
     # Define the portion of the video to crop out 
@@ -50,7 +55,7 @@ def predict_eye_features(filepath: str,
       assert "dual" in video_name, f"'dual' not in video name: {video_name}"
       eye_video_name: str = video_name.replace("dual", eye_label)  
 
-      visualization_output_path: str = os.path.join(output_folder_path, f"{eye_video_name}_eye_features_visualized.avi")
+      visualization_output_path: str = os.path.join(output_folder_path, f"{eye_video_name}_eyeFeatures_visualized.avi")
       output_path: str = os.path.join(output_folder_path, f"{eye_video_name}_eyeFeatures.mat")
       if(os.path.exists(output_path) and overrwrite_existing is False):
           continue 
@@ -67,9 +72,14 @@ def predict_eye_features(filepath: str,
 
       video_resized: np.ndarray = np.zeros((len(eye_video), *target_size), dtype=np.uint8)
       video_resized[:, y_offset:y_offset + eye_video_pixel_modified.shape[1], x_offset:x_offset + eye_video_pixel_modified.shape[2]] = eye_video_pixel_modified
+      video_resized[:] = [ apply_pixel_transformations(frame, gamma, contrast_alpha_beta) for frame in video_resized ]
+
+      # If the eye is the left eye, flip it so it is in the same orientation as the right
+      if(eye_label == "L"):
+        video_resized[:] = [ np.fliplr(frame) for frame in video_resized ]
 
       # Display the transfomred image if desired
-         # If we want to visualize, we will display what the thresholding and cropping looks like 
+      # If we want to visualize, we will display what the thresholding and cropping looks like 
       fig, axes = None, None
       if(visualize_results is True):
           fig, axes = plt.subplots(1, 3, figsize=(16, 14))
@@ -83,7 +93,7 @@ def predict_eye_features(filepath: str,
           crop_box_rect: patches.Rectangle = patches.Rectangle((l, t), r-l, b-t, linewidth=2, edgecolor='red', facecolor='none', fill=False)
           axes[1].add_patch(crop_box_rect)
 
-          axes[2].set_title(f"{eye_label} | After Pixel Brightness + Spatial Transformation")
+          axes[2].set_title(f"{eye_label} | After Pixel + Spatial Transformations")
           axes[2].imshow(video_resized[0], cmap='gray')
 
           # Show the figure
@@ -94,7 +104,17 @@ def predict_eye_features(filepath: str,
           os.mkdir(temp_dir_path)
 
       temp_video_path: str = os.path.join(temp_dir_path, f"temp_{eye_video_name}.avi")
+
+      # If we are in debug mode, we only want to see output of some small portion of the video
+      if(debug_mode is True):
+          video_resized = video_resized[:500]
+
       video_io.frames_to_video(video_resized, temp_video_path, video_fps)
+
+      # If overwrite existing is false and visualization already exists, then 
+      # we ignore it 
+      if(os.path.exists(visualization_output_path) and overrwrite_existing is False):
+          visualize_results = False
 
       # Extract the eye features for this video
       eye_features, perimeter_info_dict = extract_eye_features.extract_eye_features(temp_video_path, 
@@ -104,7 +124,8 @@ def predict_eye_features(filepath: str,
                                                                                     pupil_feature_method='pylids', 
                                                                                     safe_execution=True
                                                                                    )
-
+      
+      assert len(eye_features) == len(video_resized), f"Eye features: {len(eye_features)} not equal to actual video length: {len(video_resized)}"
                                                                                    
       # Repackage the features along with their metadata
       eye_features_dict: dict = {}
@@ -131,6 +152,21 @@ def predict_eye_features(filepath: str,
       os.remove(temp_video_path)
 
     return 
+
+def apply_pixel_transformations(frame: np.ndarray, gamma: float, contrast_alpha_beta: tuple[float]) -> np.ndarray:
+    # Adjust contrast 
+    frame = cv2.convertScaleAbs(frame, *contrast_alpha_beta)
+
+    # Adjust gamma 
+    invGamma = 1.0 / gamma
+    table = np.array([
+        ((i / 255.0) ** invGamma) * 255
+        for i in range(256)
+    ]).astype("uint8")
+    frame = cv2.LUT(frame, table)
+
+
+    return frame
 
 def main():
     pass 

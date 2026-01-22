@@ -69,7 +69,7 @@ def dir_to_video(dir_path: str, output_path: str, fps: float=30) -> None:
    of those frames at the specified FPS
 """
 def frames_to_video(frames: np.ndarray | queue.Queue, output_path: str, fps: float, 
-                    stop_event: object=None, timeout: float | None=None 
+                    stop_event: object=None, timeout: float | None=10 
                    ) -> None:
    
     # Retreive a sample frame from the video so we can get some information 
