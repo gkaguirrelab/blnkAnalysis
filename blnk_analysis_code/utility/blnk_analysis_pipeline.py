@@ -25,8 +25,9 @@ def predict_eye_features(filepath: str,
                          threshold_value: int=225,
                          visualize_results: bool=False,
                          overrwrite_existing: bool=False,
-                         contrast_alpha_beta: tuple[float] = (1, 0),
+                         contrast: float=1,
                          gamma: float = 1,
+                         brightness: float=0,
                          debug_mode: bool=False
                         ) -> None:
 
@@ -72,11 +73,25 @@ def predict_eye_features(filepath: str,
 
       video_resized: np.ndarray = np.zeros((len(eye_video), *target_size), dtype=np.uint8)
       video_resized[:, y_offset:y_offset + eye_video_pixel_modified.shape[1], x_offset:x_offset + eye_video_pixel_modified.shape[2]] = eye_video_pixel_modified
-      video_resized[:] = [ apply_pixel_transformations(frame, gamma, contrast_alpha_beta) for frame in video_resized ]
 
       # If the eye is the left eye, flip it so it is in the same orientation as the right
       if(eye_label == "L"):
         video_resized[:] = [ np.fliplr(frame) for frame in video_resized ]
+
+      # Generate a temp video from this cropped video 
+      if(not os.path.exists(temp_dir_path)):
+          os.mkdir(temp_dir_path)
+
+      temp_video_path: str = os.path.join(temp_dir_path, f"temp_{eye_video_name}.avi")
+      temp_video_path_step2: str = temp_video_path.replace("temp", "temp2")
+
+      # If we are in debug mode, we only want to see output of some small portion of the video
+      if(debug_mode is True):
+          video_resized = video_resized[:500]
+
+      video_io.frames_to_video(video_resized, temp_video_path, video_fps)
+      apply_ffmpeg_contrast_gamma(temp_video_path, temp_video_path_step2, contrast=contrast, gamma=gamma, brightness=brightness)
+      os.replace(temp_video_path_step2, temp_video_path)
 
       # Display the transfomred image if desired
       # If we want to visualize, we will display what the thresholding and cropping looks like 
@@ -94,22 +109,10 @@ def predict_eye_features(filepath: str,
           axes[1].add_patch(crop_box_rect)
 
           axes[2].set_title(f"{eye_label} | After Pixel + Spatial Transformations")
-          axes[2].imshow(video_resized[0], cmap='gray')
+          axes[2].imshow(video_io.extract_frames_from_video(temp_video_path, (0,), is_grayscale=True), cmap='gray')
 
           # Show the figure
           plt.show()
-
-      # Generate a temp video from this cropped video 
-      if(not os.path.exists(temp_dir_path)):
-          os.mkdir(temp_dir_path)
-
-      temp_video_path: str = os.path.join(temp_dir_path, f"temp_{eye_video_name}.avi")
-
-      # If we are in debug mode, we only want to see output of some small portion of the video
-      if(debug_mode is True):
-          video_resized = video_resized[:500]
-
-      video_io.frames_to_video(video_resized, temp_video_path, video_fps)
 
       # If overwrite existing is false and visualization already exists, then 
       # we ignore it 
@@ -133,12 +136,12 @@ def predict_eye_features(filepath: str,
       eye_features_dict["metadata"] = {'threshold_value': {'v': threshold_value, 
                                                       'desc': "binary mask constructed from avg cropped frame. Pixels above this value=0. Done to remove light around the eye"
                                                         },
-                                      'crop_box': {'v': crop_box, 
+                                       'crop_box': {'v': crop_box, 
                                                   'desc': "box cropped out from original video to isolate the eye (t, b, l, r)"
                                                   },
-                                      'target_size': {'v': target_size,
+                                       'target_size': {'v': target_size,
                                                       'desc': "target size after crop + threshold. Eye video is centered via padding to reach this size"},
-                                      'model_names': {'v': ('pytorch-pupil-v1', 'pytorch-eyelid-v1'), 
+                                       'model_names': {'v': ('pytorch-pupil-v1', 'pytorch-eyelid-v1'), 
                                                       'desc': "models used for pupil/eyelid fitting"
                                                     }
                                     }
@@ -153,20 +156,21 @@ def predict_eye_features(filepath: str,
 
     return 
 
-def apply_pixel_transformations(frame: np.ndarray, gamma: float, contrast_alpha_beta: tuple[float]) -> np.ndarray:
-    # Adjust contrast 
-    frame = cv2.convertScaleAbs(frame, *contrast_alpha_beta)
 
-    # Adjust gamma 
-    invGamma = 1.0 / gamma
-    table = np.array([
-        ((i / 255.0) ** invGamma) * 255
-        for i in range(256)
-    ]).astype("uint8")
-    frame = cv2.LUT(frame, table)
+def apply_ffmpeg_contrast_gamma(input_path: str, output_path: str,
+                                contrast: float=1.0, gamma: float=1.0, brightness: float=0.0
+                               ):
+    cmd: list[str]= [ "ffmpeg",
+                      "-y",  # overwrite
+                      "-i", input_path,
+                      "-vf", f"eq=contrast={contrast}:brightness={brightness}:gamma={gamma}",
+                      "-c:a", "copy",  # keep audio if present
+                      output_path
+                    ]
 
+    subprocess.run(cmd, check=True)
 
-    return frame
+    return 
 
 def main():
     pass 
