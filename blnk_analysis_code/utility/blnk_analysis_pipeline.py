@@ -19,7 +19,7 @@ import video_io
 """Predict eye features (pupil and eyelid) for a given BLNK video"""
 def predict_eye_features(filepath: str,
                          output_folder_path: str, 
-                         crop_box: tuple[int]=(140, 275, 190, 425), 
+                         crop_ellipse: None | dict[str, float | tuple]=None, 
                          target_size: tuple[int]=(480, 640),   
                          temp_dir_path: str="./BLNK_temp", 
                          threshold_value: int=225,
@@ -31,8 +31,6 @@ def predict_eye_features(filepath: str,
                          debug_mode: bool=False
                         ) -> None:
 
-    # Define the portion of the video to crop out 
-    t, b, l, r = crop_box
 
     # Extract the name of this video
     video_name: str = os.path.splitext(os.path.basename(filepath.rstrip('/')))[0]
@@ -47,7 +45,7 @@ def predict_eye_features(filepath: str,
     # videos of L and R eyes joined at the middle. They are 
     # the same size originally image wise, so first, we must split them 
     width_midpoint: int = video_as_arr.shape[2] // 2
-    L_video: np.ndarary = video_as_arr[:, :, :width_midpoint]
+    L_video: np.ndarray = video_as_arr[:, :, :width_midpoint]
     R_video: np.ndarray = video_as_arr[:, :, width_midpoint:]
     assert L_video.shape == R_video.shape, f"Shape of L video: {L_video.shape} not equal to R video: {R_video.shape}"
 
@@ -63,7 +61,26 @@ def predict_eye_features(filepath: str,
 
       # Crop out only the eye from the video
       # and set the rest of the frame to black 
-      eye_video_pixel_modified: np.ndarray = eye_video[:, t:b, l:r].copy()
+      frame_height, frame_width = eye_video.shape[1:3]
+      if(crop_ellipse is None):
+        crop_ellipse = {}
+        crop_ellipse["center"] = (frame_width // 2, frame_height // 2) 
+        crop_ellipse["axes"] = (100, 60)
+        crop_ellipse["ang_deg"] = 0
+
+      mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
+      cv2.ellipse(mask, crop_ellipse["center"], crop_ellipse["axes"], crop_ellipse["ang_deg"], 
+                  0, 360, 255, -1
+                 )
+
+      eye_video_pixel_modified: np.ndarray = eye_video.copy()
+      masked: np.ndarray = eye_video_pixel_modified
+      masked[:, mask == 0] = 0
+      ys, xs = np.where(mask > 0)
+      y0, y1 = ys.min(), ys.max() + 1
+      x0, x1 = xs.min(), xs.max() + 1
+      eye_video_pixel_modified = masked[:, y0:y1, x0:x1]
+
       white_pixels: np.ndarray = np.mean(eye_video_pixel_modified, axis=(0,)) > threshold_value
       eye_video_pixel_modified[:, white_pixels] = 0
 
@@ -73,10 +90,6 @@ def predict_eye_features(filepath: str,
 
       video_resized: np.ndarray = np.zeros((len(eye_video), *target_size), dtype=np.uint8)
       video_resized[:, y_offset:y_offset + eye_video_pixel_modified.shape[1], x_offset:x_offset + eye_video_pixel_modified.shape[2]] = eye_video_pixel_modified
-
-      # If the eye is the left eye, flip it so it is in the same orientation as the right
-      if(eye_label == "L"):
-        video_resized[:] = [ np.fliplr(frame) for frame in video_resized ]
 
       # Generate a temp video from this cropped video 
       if(not os.path.exists(temp_dir_path)):
@@ -105,8 +118,15 @@ def predict_eye_features(filepath: str,
 
           axes[1].set_title(f"{eye_label} | Before Transformations")
           axes[1].imshow(eye_video[0], cmap='gray')
-          crop_box_rect: patches.Rectangle = patches.Rectangle((l, t), r-l, b-t, linewidth=2, edgecolor='red', facecolor='none', fill=False)
-          axes[1].add_patch(crop_box_rect)
+
+          ellipse_patch = patches.Ellipse(xy=crop_ellipse["center"], 
+                                        width=2*crop_ellipse["axes"][0],      
+                                        height=2*crop_ellipse["axes"][1],     
+                                        angle=crop_ellipse["ang_deg"],        
+                                        edgecolor='r',
+                                        facecolor='none'
+                                        )
+          axes[1].add_patch(ellipse_patch)
 
           axes[2].set_title(f"{eye_label} | After Pixel + Spatial Transformations")
           sample_frame: np.ndarray = np.squeeze(video_io.extract_frames_from_video(temp_video_path, (0,), is_grayscale=True))
@@ -137,9 +157,12 @@ def predict_eye_features(filepath: str,
       eye_features_dict["metadata"] = {'threshold_value': {'v': threshold_value, 
                                                       'desc': "binary mask constructed from avg cropped frame. Pixels above this value=0. Done to remove light around the eye"
                                                         },
-                                       'crop_box': {'v': crop_box, 
+                                       'crop_ellipse': {'v': crop_ellipse, 
                                                   'desc': "box cropped out from original video to isolate the eye (t, b, l, r)"
                                                   },
+                                        'contrast_gamma_brightness': {'v': (contrast, gamma, brightness) ,
+                                                                      'desc': "The contrast, gamma, and brightness applied to the video"
+                                                                     },
                                        'target_size': {'v': target_size,
                                                       'desc': "target size after crop + threshold. Eye video is centered via padding to reach this size"},
                                        'model_names': {'v': ('pytorch-pupil-v1', 'pytorch-eyelid-v1'), 
@@ -148,7 +171,7 @@ def predict_eye_features(filepath: str,
                                     }
       
       # Output the features
-      scipy.io.savemat(os.path.join(output_folder_path, output_path), 
+      scipy.io.savemat(output_path, 
                        {"eyeFeatures": eye_features_dict}
                       )
       
