@@ -160,7 +160,7 @@ def predict_eye_features(filepath: str,
                                        'crop_ellipse': {'v': crop_ellipse, 
                                                   'desc': "box cropped out from original video to isolate the eye (t, b, l, r)"
                                                   },
-                                        'contrast_gamma_brightness': {'v': (contrast, gamma, brightness) ,
+                                        'contrast_gamma_brightness': {'v': np.array([contrast, gamma, brightness]) ,
                                                                       'desc': "The contrast, gamma, and brightness applied to the video"
                                                                      },
                                        'target_size': {'v': target_size,
