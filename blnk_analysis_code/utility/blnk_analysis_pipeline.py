@@ -154,7 +154,9 @@ def predict_eye_features(filepath: str,
       # Repackage the features along with their metadata
       eye_features_dict: dict = {}
       eye_features_dict["data"] = eye_features
-      eye_features_dict["metadata"] = {'threshold_value': {'v': threshold_value, 
+      eye_features_dict["metadata"] = {'source_filepath': {'v': filepath, 
+                                                           'desc': 'The source filepath used to generate this data. Triple sanity check with the filename'}, 
+                                       'threshold_value': {'v': threshold_value, 
                                                       'desc': "binary mask constructed from avg cropped frame. Pixels above this value=0. Done to remove light around the eye"
                                                         },
                                        'crop_ellipse': {'v': crop_ellipse, 
