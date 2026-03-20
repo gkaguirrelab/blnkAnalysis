@@ -198,6 +198,29 @@ def apply_ffmpeg_contrast_gamma(input_path: str, output_path: str,
 
     return 
 
+# We will make one more verification function that asserts all 
+# paths exist, are local, coincide with subject id, and so does the output 
+def verify_output(sid: str, o_path: str, v_paths: list[str]) -> None:
+    # If subject id is not in output path, that's an issue 
+    if(sid not in o_path or not all(sid in v_path for v_path in v_paths)):
+        raise Exception("Path error. Either sid not in o_path or some video path")
+    assert os.path.exists(o_path), f"Output path: {o_path} does not exist"
+    
+    # If any paths are not this subject ID, also eror 
+    if(any(  os.path.basename(str(pathlib.Path(v_path).parents[0])).split("_")[1] != sid  for v_path in v_paths)):
+        raise Exception("Multiple subjects in this run") 
+    
+    # Now assert video paths exist and also 
+    # that they are local 
+    for v_path in v_paths:
+        assert os.path.exists(v_path), f"{v_path} does not exist"
+    try:
+        assert video_io.inspect_video_frame_count(path) != 0, f"Frame count for path: {path} is 0" 
+    except:
+        raise Exception(f"Cannot count frames for path: {path}. Check if the file is corrupted/online-only?")
+
+    return None
+
 def main():
     pass 
 
